@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'">
+<meta name="description" content="CAN / CAN FD bus load planner for robot joint actuators. Runs fully in the browser.">
+<title>CAN Load</title>
+<link data-trunk rel="rust" href="crates/cl_web/Cargo.toml" data-wasm-opt="z">
+<style>
+:root {
+  --bg0: #0b0f17; --bg1: #121a28; --card: #161f30cc; --line: #26324a; --text: #e6ecf5; --muted: #8d9ab3;
+  --accent: #5b9cff; --pass: #3ad1a4; --warn: #f2b84b; --fail: #ff6b6b; --radius: 10px; --t: 170ms;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+  color: var(--text); min-height: 100vh;
+  background: radial-gradient(1200px 600px at 10% -10%, #1b2b4a 0%, transparent 60%),
+              radial-gradient(900px 500px at 110% 10%, #1d1838 0%, transparent 55%), var(--bg0);
+}
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bar { display: flex; gap: 8px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line);
+  background: #0b0f17cc; position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+.bar h1 { font-size: 16px; margin: 0 auto 0 0; letter-spacing: .02em; }
+.bar h1 small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.btn, select, input { background: var(--bg1); border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px;
+  transition: border-color var(--t), background var(--t); }
+.btn { cursor: pointer; }
+.btn:hover, select:hover, input:hover { border-color: #3a4a6a; }
+.btn.primary { background: #1e3a6b; border-color: #2e5596; }
+.hint { margin: 10px 16px 0; padding: 8px 12px; border: 1px solid #2e5596; border-radius: var(--radius);
+  background: #13233fcc; display: flex; gap: 10px; align-items: center; transition: opacity var(--t); }
+.hint[hidden] { display: none; }
+.hint p { margin: 0; flex: 1; }
+.hero { position: relative; margin: 10px 16px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: #0e1522; overflow: hidden; }
+#timeline { display: block; width: 100%; height: 200px; }
+#hud { position: absolute; top: 8px; right: 10px; display: flex; gap: 14px; font-size: 12px; pointer-events: none;
+  background: #0b0f17cc; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); }
+#hud b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+#hud span { color: var(--muted); }
+#tip { position: absolute; pointer-events: none; background: #0b0f17f0; border: 1px solid var(--line);
+  border-radius: 7px; padding: 6px 9px; font-size: 12px; white-space: pre; opacity: 0; transition: opacity var(--t); }
+#tip.on { opacity: 1; }
+.pass { color: var(--pass); } .warn { color: var(--warn); } .fail { color: var(--fail); }
+.layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 12px; padding: 0 16px 24px; }
+.layout > * { min-width: 0; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 12px; }
+.card > summary { cursor: pointer; padding: 9px 12px; font-weight: 600; list-style: none; }
+.card > summary::before { content: "▸ "; color: var(--muted); }
+.card[open] > summary::before { content: "▾ "; }
+.card .body { padding: 0 12px 12px; }
+.field { display: grid; grid-template-columns: 1fr 150px; gap: 6px; align-items: center; margin: 6px 0; }
+.field label { color: var(--muted); }
+.field[hidden] { display: none; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 4px 5px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+td:first-child, th:first-child, td.l { text-align: left; }
+td input { width: 64px; padding: 3px 5px; }
+td input.name { width: 200px; }
+td input[type=color] { width: 26px; height: 24px; padding: 0; border-radius: 50%; cursor: pointer; }
+td select { padding: 3px 5px; }
+.snap { color: var(--warn); font-size: 11px; margin-left: 3px; }
+.rowbtn { background: none; border: 1px solid transparent; border-radius: 5px; cursor: pointer; padding: 2px 6px; color: var(--muted); }
+.rowbtn:hover { border-color: var(--line); color: var(--text); }
+tfoot td { font-weight: 600; border-bottom: none; }
+.scroll { overflow-x: auto; }
+#rateplot { display: block; width: 100%; height: 170px; }
+.note { color: var(--muted); font-size: 12px; }
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 8px 0; }
+.kv div { background: #0e1522; border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; }
+.kv span { color: var(--muted); font-size: 12px; display: block; }
+.sheet-toggle { display: none; }
+@media (max-width: 820px) {
+  .layout { grid-template-columns: minmax(0, 1fr); padding-bottom: 70px; }
+  .bar h1 small { display: none; }
+  .sheet-toggle { display: inline-block; }
+  #sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; max-height: 75vh; overflow-y: auto;
+    background: var(--bg1); border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; padding: 12px 12px 4px;
+    transform: translateY(calc(100% - 44px)); transition: transform 200ms ease; box-shadow: 0 -10px 30px #0008; }
+  #sheet.open { transform: none; }
+  .sheet-handle { display: block; width: 100%; height: 24px; margin: -6px 0 8px; background: none; border: none; cursor: pointer; }
+  .sheet-handle::before { content: ""; display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--muted); margin: 0 auto; }
+  #hud { position: static; flex-wrap: wrap; border: none; border-top: 1px solid var(--line); border-radius: 0; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>CAN Load <small data-ko="로봇 액추에이터 CAN 버스 부하 계획" data-en="Robot actuator CAN bus load planner">로봇 액추에이터 CAN 버스 부하 계획</small></h1>
+  <label for="preset" class="note" data-ko="예시" data-en="Preset">예시</label>
+  <select id="preset">
+    <option value="humanoid" data-ko="12관절 휴머노이드 양팔 @ 1 kHz CAN FD (예시)" data-en="12-joint humanoid arm pair @ 1 kHz CAN FD (illustrative)">12관절 휴머노이드 양팔 @ 1 kHz CAN FD (예시)</option>
+    <option value="base" data-ko="4륜 베이스 @ 200 Hz 클래식 CAN (예시)" data-en="4-wheel base @ 200 Hz classic CAN (illustrative)">4륜 베이스 @ 200 Hz 클래식 CAN (예시)</option>
+    <option value="arm6" data-ko="6자유도 팔 @ 500 Hz 클래식 1 Mbit/s (예시)" data-en="6-DoF arm @ 500 Hz classic 1 Mbit/s (illustrative)">6자유도 팔 @ 500 Hz 클래식 1 Mbit/s (예시)</option>
+  </select>
+  <button class="btn" data-act="csv" data-ko="CSV 내보내기" data-en="Export CSV">CSV 내보내기</button>
+  <button class="btn" data-act="lang" aria-label="Language / 언어">EN</button>
+  <button class="btn sheet-toggle" data-act="sheet" data-ko="설정" data-en="Settings">설정</button>
+</header>
+
+<div class="hint" id="hint" role="note">
+  <p data-ko="예시가 이미 로드되어 있습니다. 표의 값을 바꾸면 타임라인이 즉시 갱신됩니다. 타임라인에 마우스를 올리거나 포커스 후 ←/→ 키로 프레임을 살펴보세요." data-en="An example is already loaded. Edit the table and the timeline updates instantly. Hover the timeline, or focus it and use ←/→ to inspect frames.">예시가 이미 로드되어 있습니다. 표의 값을 바꾸면 타임라인이 즉시 갱신됩니다. 타임라인에 마우스를 올리거나 포커스 후 ←/→ 키로 프레임을 살펴보세요.</p>
+  <button class="btn" data-act="hint" data-ko="닫기" data-en="Dismiss">닫기</button>
+</div>
+
+<section class="hero">
+  <canvas id="timeline" tabindex="0" role="img" aria-label="One control cycle bus timeline"></canvas>
+  <div id="hud" aria-live="polite"></div>
+  <div id="tip" role="tooltip"></div>
+</section>
+
+<div class="layout">
+  <aside id="sheet">
+    <button class="sheet-handle sheet-toggle" data-act="sheet" aria-label="Settings / 설정"></button>
+    <details class="card" open>
+      <summary data-ko="버스 설정" data-en="Bus settings">버스 설정</summary>
+      <div class="body">
+        <div class="field"><label for="proto" data-ko="프로토콜" data-en="Protocol">프로토콜</label>
+          <select id="proto"><option value="classic">Classic CAN 2.0</option><option value="fd">CAN FD</option></select></div>
+        <div class="field"><label for="nominal" data-ko="공칭 비트레이트" data-en="Nominal bitrate">공칭 비트레이트</label>
+          <select id="nominal"><option value="125000">125 kbit/s</option><option value="250000">250 kbit/s</option>
+            <option value="500000">500 kbit/s</option><option value="800000">800 kbit/s</option><option value="1000000">1 Mbit/s</option></select></div>
+        <div class="field" id="datafield"><label for="data" data-ko="FD 데이터 비트레이트" data-en="FD data bitrate">FD 데이터 비트레이트</label>
+          <select id="data"><option value="1000000">1 Mbit/s</option><option value="2000000">2 Mbit/s</option><option value="4000000">4 Mbit/s</option>
+            <option value="5000000">5 Mbit/s</option><option value="8000000">8 Mbit/s</option></select></div>
+        <div class="field"><label for="idtype" data-ko="식별자" data-en="Identifier">식별자</label>
+          <select id="idtype"><option value="11">11-bit</option><option value="29">29-bit</option></select></div>
+        <div class="field"><label for="stuff" data-ko="비트 스터핑" data-en="Bit stuffing">비트 스터핑</label>
+          <select id="stuff"><option value="none" data-ko="없음" data-en="None">없음</option>
+            <option value="typical" data-ko="일반 (최악의 절반)" data-en="Typical (half of worst)">일반 (최악의 절반)</option>
+            <option value="worst" data-ko="최악" data-en="Worst case">최악</option></select></div>
+        <div class="field"><label for="target" data-ko="목표 최대 부하 %" data-en="Target max load %">목표 최대 부하 %</label>
+          <input id="target" type="number" min="1" max="100" step="1" value="70"></div>
+      </div>
+    </details>
+    <details class="card">
+      <summary data-ko="비트 타이밍 도우미" data-en="Bit-timing helper">비트 타이밍 도우미</summary>
+      <div class="body">
+        <div class="field"><label for="clock" data-ko="컨트롤러 클럭 (MHz)" data-en="Controller clock (MHz)">컨트롤러 클럭 (MHz)</label>
+          <input id="clock" type="number" min="1" max="200" step="1" value="40"></div>
+        <div class="field"><label for="sp" data-ko="공칭 샘플 포인트 %" data-en="Nominal sample point %">공칭 샘플 포인트 %</label>
+          <input id="sp" type="number" min="50" max="95" step="0.5" value="80"></div>
+        <div class="field" id="dspfield"><label for="dsp" data-ko="데이터 샘플 포인트 %" data-en="Data sample point %">데이터 샘플 포인트 %</label>
+          <input id="dsp" type="number" min="50" max="95" step="0.5" value="75"></div>
+        <div id="timing"></div>
+      </div>
+    </details>
+  </aside>
+
+  <main>
+    <details class="card" open>
+      <summary data-ko="메시지 목록" data-en="Message list">메시지 목록</summary>
+      <div class="body">
+        <div class="scroll"><table>
+          <thead><tr>
+            <th></th><th data-ko="이름" data-en="Name">이름</th><th data-ko="개수" data-en="Count">개수</th>
+            <th data-ko="페이로드 B" data-en="Payload B">페이로드 B</th><th data-ko="주기 Hz" data-en="Rate Hz">주기 Hz</th>
+            <th data-ko="방향" data-en="Direction">방향</th><th data-ko="비트/프레임" data-en="Bits/frame">비트/프레임</th>
+            <th>µs/frame</th><th data-ko="프레임/s" data-en="Frames/s">프레임/s</th><th data-ko="부하 %" data-en="Load %">부하 %</th>
+            <th data-ko="점유율" data-en="Share">점유율</th><th></th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+          <tfoot><tr id="total"></tr></tfoot>
+        </table></div>
+        <p><button class="btn primary" data-act="add" data-ko="+ 행 추가" data-en="+ Add row">+ 행 추가</button></p>
+        <div class="kv" id="summary"></div>
+      </div>
+    </details>
+    <details class="card" open>
+      <summary data-ko="제어 주기 대비 부하" data-en="Load vs. control rate">제어 주기 대비 부하</summary>
+      <div class="body"><canvas id="rateplot" role="img" aria-label="Load percent versus control rate"></canvas></div>
+    </details>
+    <details class="card" open>
+      <summary data-ko="계획용 추정치입니다" data-en="This is a planning estimate">계획용 추정치입니다</summary>
+      <div class="body note">
+        <p data-ko="가장 빠른 주기의 행들을 &quot;제어 주기&quot; 행으로 봅니다. 프레임은 행 순서(우선순위)대로 빈틈없이 이어 보낸다고 가정합니다. 더 느린 행은 주기당 평균 점유 시간으로 흐리게 표시됩니다." data-en="Rows at the fastest rate are treated as the &quot;control&quot; rows. Frames are assumed to be sent back-to-back in row (priority) order. Slower rows are drawn faded as their average time per cycle.">가장 빠른 주기의 행들을 "제어 주기" 행으로 봅니다. 프레임은 행 순서(우선순위)대로 빈틈없이 이어 보낸다고 가정합니다. 더 느린 행은 주기당 평균 점유 시간으로 흐리게 표시됩니다.</p>
+        <p data-ko="중재 지터, 에러 프레임, 재전송, bus-off 복구, 게이트웨이/드라이버 지연, 실제 트랜시버 루프 지연은 포함되지 않으며 실측이 필요합니다." data-en="Arbitration jitter, error frames, retransmissions, bus-off recovery, gateway/driver latency and the actual transceiver loop delay are not modelled and need measurement.">중재 지터, 에러 프레임, 재전송, bus-off 복구, 게이트웨이/드라이버 지연, 실제 트랜시버 루프 지연은 포함되지 않으며 실측이 필요합니다.</p>
+        <p data-ko="모든 값은 브라우저 안에서만 계산되며 어디로도 전송되지 않습니다." data-en="Everything is computed in your browser; nothing is sent anywhere.">모든 값은 브라우저 안에서만 계산되며 어디로도 전송되지 않습니다.</p>
+      </div>
+    </details>
+  </main>
+</div>
+</body>
+</html>
